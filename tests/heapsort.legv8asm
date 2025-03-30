@@ -1,0 +1,280 @@
+// Heapsort in LEGv8ASM
+// By:
+//  - Connor Tynan (ctynan@iastate.edu)
+
+// main initializes the array to start at Main Memory 0x00
+// with array size = 64 elements (64*8 bytes of memory used)8
+main:
+    ADDI X0, XZR, #0x00
+    ADDI X1, XZR, #64
+    BL fill                        // fill(0x00, 64)
+
+    ADDI X0, XZR, #0x00
+    ADDI X1, XZR, #64
+    BL heapsort                    // heapsort(0x00, 64)
+
+    // HALT                           // exit
+
+// void fill -------------------------------------------------------------------
+// Arguments:
+//   X0: pointer to array (uint64_t *a)
+//   X1: size of array (uint64_t s)
+// Temporary registers:
+//   X2: loop counter (i)
+//   X3: loop bound (s / 2)
+//   X4, X5: temporaries for address calculations
+//   X6, X7: temporaries for data calculations
+fill:
+    // Save LR
+    SUBI SP, SP, #8
+    STUR X30, [SP, #0]             // LR
+
+    SUBIS XZR, X1, #2
+    B.LT fill_loop_end             // if s < 2, skip loop
+
+    ADDI X2, XZR, #0               // i = 0
+
+    // Calculate loop bound
+    LSR X3, X1, #1                 // X3 = s / 2
+
+fill_loop_start:
+    SUBS XZR, X2, X3               // i - s/2
+    B.GE fill_loop_end             // if (i >= s/2) exit loop
+
+    // First assignment: a[((s+1)/2) - (i+1)] = i * 2
+    ADDI X4, X1, #1                // s + 1
+    LSR X4, X4, #1                 // (s + 1) / 2
+    SUB X4, X4, X2                 // ((s+1)/2) - i
+    SUBI X4, X4, #1                // ((s+1)/2) - (i+1)
+    LSL X4, X4, #3                 // byte offset
+    ADD X5, X0, X4                 // &a[((s+1)/2) - (i+1)]
+
+    LSL X6, X2, #1                 // i * 2
+    STUR X6, [X5, #0]              // &a[((s+1)/2) - (i+1)] = i * 2
+
+    // Second assignment: a[((s+1)/2) + i] = i * 2 + 1
+    ADDI X4, X1, #1                // s + 1
+    LSR X4, X4, #1                 // (s + 1) / 2
+    ADD X4, X4, X2                 // ((s+1)/2) + i
+    LSL X4, X4, #3                 // byte offset
+    ADD X5, X0, X4                 // &a[((s+1)/2) + i]
+
+    ADDI X7, X6, #1                // i*2 + 1
+    STUR X7, [X5, #0]              // &a[((s+1)/2) + i] = i*2 + 1
+
+    ADDI X2, X2, #1                // i++
+    B fill_loop_start
+
+fill_loop_end:
+    ANDI X4, X1, #1
+    CBZ X4, fill_end               // if (s & 0), skip
+
+    // if s is odd
+    SUBI X5, X1, #1
+    STUR X5, [X0, #0]              // a[0] = s - 1
+
+fill_end:
+    // Restore callee-saved registers
+    LDUR X30, [SP, #0]
+    ADDI SP,  SP, #8
+
+    BR   X30                       // Return
+
+
+// void swap -------------------------------------------------------------------
+// Arguments:
+//   X0: pointer to first value (uint64_t *a)
+//   X1: pointer to second value (uint64_t *b)
+// Temporaries:
+//   X2: temporary for value at *a
+//   X3: temporary for value at *b
+swap:
+    // Saave LR
+    SUBI SP, SP, #8
+    STUR X30, [SP, #0]             // LR
+
+    LDUR X2, [X0, #0]              // X2 = *a
+    LDUR X3, [X1, #0]              // X3 = *b
+    STUR X3, [X0, #0]              // *a = X3 (*b)
+    STUR X2, [X1, #0]              // *b = X2 (original *a)
+
+    // Restore callee-saved registers
+    LDUR X30, [SP, #0]
+    ADDI SP,  SP, #8
+
+    BR   X30                       // Return
+
+// void percolate_down ---------------------------------------------------------
+// Arguments:
+//   X0: pointer to array (uint64_t *a)
+//   X1: size of array (uint64_t s)
+//   X2: index in a (uint64_t i)
+// Temporary registers:
+//   X3-X4: temporaries for address calculations
+//   X5-X6: temporaries for data calculations
+percolate_down:
+    // Save LR and callee-saved registers (*a, s, child, i)
+    SUBI SP, SP, #40
+    STUR X30, [SP, #32]            // LR
+    STUR X19, [SP, #24]            // *a
+    STUR X20, [SP, #16]            // s
+    STUR X21, [SP, #8]             // child
+    STUR X22, [SP, #0]             // i
+
+    ADDI X19, X0, #0               // hold *a
+    ADDI X20, X1, #0               // hold s
+    ADDI X21, X2, #0               // initialize child = i
+
+perc_down_loop_start:
+    ADDI X22, X21, #0              // i = child
+    LSL X21, X22, #1               // child = 2*i
+    ADDI X21, X21, #1              // child = 2*i + 1
+
+    SUBS XZR, X21, X20             // child - s
+    B.GE perc_down_loop_end        // if (child >= s) exit loop
+
+    // Check if (child + 1 < s && a[child] < a[child + 1])
+    ADDI X3, X21, #1               // child + 1
+    SUBS XZR, X3, X20              // (child+1) - s
+    B.GE perc_down_skip_child_inc  // if (child+1>=s), skip increment
+
+    LSL X3, X21, #3                // child byte offset
+    ADD X3, X19, X3                // &a[child]
+    LDUR X5, [X3, #0]              // a[child]
+
+    ADDI X3, X3, #8                // &a[child+1]
+    LDUR X6, [X3, #0]              // a[child+1]
+
+    SUBS XZR, X5, X6               // a[child] >= a[child+1]
+    B.GE perc_down_skip_child_inc  // if (a[c]>=a[c+1]) skip increment
+
+    ADDI X21, X21, #1              // child++
+perc_down_skip_child_inc:
+    // Compare a[i] < a[child]
+    LSL X3, X22, #3                // i byte offset
+    ADD X3, X19, X3                // &a[i]
+    LDUR X5, [X3, #0]              // a[i]
+
+    LSL X4, X21, #3                // child byte offset
+    ADD X4, X19, X4                // &a[child]
+    LDUR X6, [X4, #0]              // a[child]
+
+    SUBS XZR, X5, X6               // a[i] - a[child]
+    B.GE perc_down_loop_start      // if a[i]>=a[child], skip swap
+
+    ADDI X0, X3, #0                // &a[i]
+    ADDI X1, X4, #0                // &a[child]
+    BL swap
+
+    B perc_down_loop_start
+perc_down_loop_end:
+    // Restore callee-saved registers
+    LDUR X22, [SP, #0]
+    LDUR X21, [SP, #8]
+    LDUR X20, [SP, #16]
+    LDUR X19, [SP, #24]
+    LDUR X30, [SP, #32]
+    ADDI SP, SP, #40
+
+    BR   X30                       // Return
+
+// void heapify ----------------------------------------------------------------
+// Arguments:
+//   X0: pointer to array (uint64_t *a)
+//   X1: size of array (uint64_t s)
+// Temporaries:
+//   X2: loop index i (for percolate_down)
+heapify:
+    // Save LR and callee-saved registers (*a, s, and loop index i)
+    SUBI SP, SP, #32
+    STUR X30, [SP, #24]            // LR
+    STUR X19, [SP, #16]            // *a
+    STUR X20, [SP, #8]             // s
+    STUR X21, [SP, #0]             // loop index i
+
+    ADDI X19, X0, #0               // hold *a
+    ADDI X20, X1, #0               // hold s
+
+    ADDI X21, X20, #1              // i = s + 1
+    LSR  X21, X21, #1              // i = (s + 1) / 2
+
+heapify_loop_start:
+    CBZ  X21, heapify_loop_end     // if (i == 0) exit loop
+
+    ADDI X0, X19, #0               // *a
+    ADDI X1, X20, #0               // s
+    ADDI X2, X21, #0               // i
+
+    BL percolate_down              // percolate_down(*a, s, i)
+
+    SUBI X21, X21, #1              // i--
+    B heapify_loop_start
+
+heapify_loop_end:
+    ADDI X0, X19, #0               // *a
+    ADDI X1, X20, #0               // s
+    ADDI X2, XZR, #0               // i = 0
+
+    BL percolate_down              // percolate_down(*a, s, 0)
+
+    // Restore registers and return
+    LDUR X21, [SP, #0]
+    LDUR X20, [SP, #8]
+    LDUR X19, [SP, #16]
+    LDUR X30, [SP, #24]
+    ADDI SP, SP, #32
+
+    BR X30                         // Return
+
+// void heapsort ---------------------------------------------------------------
+// Arguments:
+//   X0: pointer to array (uint64_t *a)
+//   X1: size of array (uint64_t s)
+// Temporaries:
+//   X2: temporary for address calculation
+//   X3: temporary for data calculation
+heapsort:
+    // Save LR and callee-saved registers (*a, s, and loop index)
+    SUBI SP, SP, #32
+    STUR X30, [SP, #24]            // LR
+    STUR X19, [SP, #16]            // *a
+    STUR X20, [SP, #8]             // s
+    STUR X21, [SP, #0]             // i
+
+    ADDI X19, X0, #0               // hold *a
+    ADDI X20, X1, #0               // hold s
+
+    // Call heapify (X0 and X1 are already *a and s)
+    BL heapify                     // heapify(*a, s)
+
+    ADDI X21, XZR, #1              // i = 1
+
+heapsort_loop_start:
+    SUBS XZR, X21, X20             // i - s
+    B.GE heapsort_loop_end         // if (i >= s) exit loop
+
+    SUB X2, X20, X21               // s - i
+    LSL X2, X2, #3                 // byte offset
+    ADD X3, X19, X2                // &a[s - i]
+
+    ADDI X0, X19, #0               // &a[0]
+    ADDI X1, X3, #0                // &a[s - i]
+    BL swap                        // swap(&a[0], &a[s- i])
+
+    ADDI X0, X19, #0               // *a
+    SUB X1, X20, X21               // s - i
+    ADDI X2, XZR, #0               // 0
+    BL percolate_down              // percolate_down(*a, s-i, 0)
+
+    ADDI X21, X21, #1              // i++
+    B heapsort_loop_start
+
+heapsort_loop_end:
+    // Restore callee-saved registers
+    LDUR X21, [SP, #0]
+    LDUR X20, [SP, #8]
+    LDUR X19, [SP, #16]
+    LDUR X30, [SP, #24]
+    ADDI SP, SP, #32
+
+    BR X30                         // return

@@ -1,0 +1,4 @@
+main: // comment 0
+    ADDI X0,X0,    #4 // comment 1
+    EOR X4, SP, X20//comment 2
+    B main
